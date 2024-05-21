@@ -1,666 +1,173 @@
-import os
-from django.http import StreamingHttpResponse
-from langchain_core.callbacks import BaseCallbackHandler
-from django.conf import settings
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
-from .retriever import LLMHybridRetriever
-from .master_vectors.MV import MasterVectors
-from .chunker import ChunkText
+from cohere import RerankResponseResultsItem
 from dotenv import load_dotenv
-import json
-
+from django.conf import settings
+from langchain_openai import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from .credentials import ClientCredentials
+import uuid
+import re
 
 load_dotenv()
 
 
-file = open("system-prompt.txt", "r")
-prompt_ = file.read()
-file.close()
+class LLMHybridRetriever(ClientCredentials):
 
-PROMPT = str(prompt_)
+    def __init__(self, alpha: float = 0.8, num_results: int = 60, top_n: int = 6, verbose: bool = False):
+        super(LLMHybridRetriever, self).__init__()
 
-prompt = PromptTemplate.from_template(PROMPT)
+        self.alpha = alpha
+        self.num_results = num_results
+        self.top_n = top_n
+        self.verbose = verbose
 
-llm = ChatOpenAI(openai_api_key=settings.OPENAI_API_KEY,
-                 model_name=settings.GPT_MODEL,
-                 openai_api_base=settings.BASE_URL,
-                 temperature=0.4,
-                 max_tokens=1000,
-                 streaming=True)
+        self.__llm_class = ChatOpenAI(openai_api_key = settings.OPENAI_API_KEY,
+                                      model_name=settings.GPT_MODEL,
+                                      openai_api_base=settings.BASE_URL,
+                                      temperature=0.4,
+                                      max_tokens=200)
 
+        if verbose is True:
+            print(f"WEAVIATE CONNECTION STABLE: {self.weaviate_client.is_live()}")
 
-llm_hybrid = LLMHybridRetriever(verbose=True)
+        self.__PROMPT_CLASS = """Be a helpful assistant. Classify the given user prompt into the following category. Do not provide an explanation or a long response. Just give the category. No need to correct spelling mistakes for users. No need to provide extra information. Return category only. Do not provide any answer outside these categories.
 
-mv = MasterVectors()
+Named Concept(s) or Framework(s) or Method(s) or Model(s)
+Organizational Change or Organizational Management
+Opinion or Subjective
+Actionable Requests
+Greeting
+Definitional Questions
+Specific Domain Knowledge
+General Knowledge
+Context Required
+Ambiguous
 
-slice_document = ChunkText()
+USER PROMPT: {user_prompt}"""
 
+        self.__prompt_class = PromptTemplate.from_template(self.__PROMPT_CLASS)
 
-@api_view(http_method_names=['GET'])
-def home(request) -> Response:
-    return Response({'msg': 'this is hanna enterprise suite'}, status=status.HTTP_200_OK)
+        self.__chain_class = LLMChain(llm=self.__llm_class, prompt=self.__prompt_class)
 
+    # Comprehensive phrase
 
-class SimpleCallback(BaseCallbackHandler):
+    def search(self, query, class_: str,user: str):
+        cat = self.__chain_class.run(user_prompt=query)
 
-    async def on_llm_start(self, serialized, prompts, **kwargs):
-        if settings.DEBUG is True:
-            print(f"The LLM has Started")
+        if self.verbose is True:
+            print(f"QUESTION CATEGORY: {cat}")
 
-    async def on_llm_end(self, *args, **kwargs):
+        if "Ambiguous" == cat or "Definitional Questions" == cat \
+                or "Named Concept(s), Framework(s), Method(s), Model(s)" in cat \
+                or "Specific Domain Knowledge" in cat \
+                or "Organizational Change or Organizational Management" in cat \
+                or "Opinion or Subjective" in cat:
+            if "Ambiguous" in cat and "Context Required" in cat:
+                return ""
+            else:
+                filter_query = re.sub(r"\\", "", query)
 
-        if settings.DEBUG is True:
-            print("The LLM has ended!")
+                response = (
+                    self.weaviate_client.query
+                    .get(class_, ["content"])
+                    .with_where({
+                        'path': ['entity'],
+                        'operator': 'Equal',
+                        
+                    })
+                    .with_hybrid(
+                        query=filter_query,
+                        alpha=self.alpha,
+                    )
+                    # .with_additional("score")
+                    .with_limit(self.num_results)
+                    .do()
+                )
 
+                result = response['data']['Get'][class_]
+                weaviate_result = []
+                ranked_result = []
 
-# async def return_vectors(query: str, class_: str, entity: str, user_id: str) -> str:
-#     return retriever
+                if result is not None:
+                    for chunk in result:
+                        weaviate_result.append(chunk['content'])
 
+                    results = self.cohere_client.rerank(
+                        query=query,
+                        documents=weaviate_result,
+                        top_n=self.top_n,
+                        model='rerank-english-v2.0',
+                        return_documents=True)
+                    
+                    company_weight = 0.3
+                    entity_weight = 0.3
+                    user_weight = 0.3
+                    update_results=[]
+                    for document in results.results:
+                        relevance_score = document.relevance_score
+                        overall_score = (company_weight * relevance_score) + (entity_weight * relevance_score) + (user_weight * relevance_score)
+                        doc = RerankResponseResultsItem(index=document.index, relevance_score=relevance_score, overall_score = overall_score, text=document.document.text if hasattr(document,'document') and hasattr(document.document, 'text') else None)
+                        update_results.append(doc)
+                    update_results.sort(key=lambda x: x.overall_score, reverse=True)
+                    
+                    for chunk in update_results:
+                        ranked_result.append(chunk.text)
 
-@api_view(http_method_names=['POST'])
-def chat_stream(request):
-    try:
-        company = json.loads(request.body)
-        print(company)
-
-        retriever = llm_hybrid.search(company['query'], company['collection'], company['entity'],company['user'])
-
-        config = {
-            'callbacks': [SimpleCallback()]
-        }
-
-        # return Response(retriever, status=status.HTTP_200_OK)
-
-        chain = prompt | llm | StrOutputParser()
-
-        response = chain.stream({'matching_model': retriever,
-                                 'question': company['query'],
-                                 'username': company['user'],
-                                 'chat_history': {},
-                                 'language_to_use': company['language']}, config=config)
-
-        response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
-        response['Cache-Control'] = 'no-cache'
-
-        return response
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def create_collection(request) -> Response:
-    try:
-        company = json.loads(request.body)
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is True:
-            return Response({'error': 'This collection already exists!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        llm_hybrid.add_collection(collection)
-
-        return Response({'msg': f'Collection created!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW CREATE COLLECTION:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def add_vectors(request) -> Response:
-    try:
-        company = json.loads(request.body)
-        collection = "C" + str(company['collection'])
-        entity = str(company['entity'])
-        user_id = str(company['user_id'])
-        type_ = str(company['type'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        documents = slice_document.chunk_corpus(company['text'])
-
-        # PV -> Private Vec
-        # INV -> Init Vec
-        # CMV -> Company Vec
-            # file -> context -> uuid -> search
-        if type_ == "PV":
-            combine_ids = "INP" + entity # -> Initiative ID
-            uid = llm_hybrid.add_batch(documents, user_id, combine_ids, collection)
-        elif type_ == "CMV":
-            # C72 -> entity
-            uid = llm_hybrid.add_batch(documents, user_id, collection, collection)
-        elif type_ == "INV":
-            uid = llm_hybrid.add_batch(documents, user_id, entity, collection)
+                    return "\n".join(ranked_result)
+                else:
+                    return ""
         else:
-            return Response({'error': 'No such type!'}, status=status.HTTP_400_BAD_REQUEST)
+            return ""
 
-        return Response({'msg': str(uid)}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW ADD VEC:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    def add_batch(self, batch: list, user_id: str, entity: str, class_: str):
+        try:
+            unique_id = uuid.uuid4()
 
-
-@api_view(http_method_names=['POST'])
-def upload_file(request):
-    try:
-        data_file = request.FILES['file_upload']
-        print(f'File Upload! {data_file}')
-        print(request.POST)
-
-        collection = "C" + str(request.POST.get('collection'))
-        entity = str(request.POST.get('entity'))
-        user_id = str(request.POST.get('user_id'))
-        type_ = str(request.POST.get('type'))
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        file_name = data_file.name
-
-        destination = open("./_tmp/" + file_name, 'wb+')
-        for chunk in data_file.chunks():
-            destination.write(chunk)
-        destination.close()
-
-        documents = slice_document.chunk_document(file_name)
-
-        # PV -> Private Vec
-        # INV -> Init Vec
-        # CMV -> Company Vec
-        # file -> context -> uuid -> search
-        if type_ == "PV":
-            combine_ids = "INP" + entity  # -> Initiative ID
-            uid = llm_hybrid.add_batch(documents, user_id, combine_ids, collection)
-        elif type_ == "CMV":
-            # C72 -> entity
-            uid = llm_hybrid.add_batch(documents, user_id, collection, collection)
-        elif type_ == "INV":
-            uid = llm_hybrid.add_batch(documents, user_id, entity, collection)
-        else:
-            return Response({'error': 'No such type!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        os.remove("./_tmp/" + file_name)
-        return Response({'msg': str(uid)}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'msg': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_collection(request):
-    try:
-        company = json.loads(request.body)
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = (llm_hybrid.weaviate_client.query.get(collection, ['entity', 'uuid', 'content', 'user_id'])
-                       .with_additional(["id"])
-                       .do())
-
-        res = data_object['data']['Get']
-        # print(res)
-        return Response({'msg': res}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW GET COLLECTION:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_objects_entity(request):
-    try:
-        company = json.loads(request.body)
-        entity = str(company['entity'])
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = llm_hybrid.filter_by('entity', entity, collection)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW GET OBJECTS ENTITY:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_objects_uuid(request):
-    try:
-        company = json.loads(request.body)
-        uid = str(company['uuid'])
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-
-        data_object = llm_hybrid.filter_by('uuid', uid, collection)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW GET OBJECTS UUID:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_object(request):
-    try:
-        company = json.loads(request.body)
-        obj_id = company['id']
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = llm_hybrid.get_by_id(collection, obj_id)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW GET OBJECT:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_object(request):
-    try:
-        company = json.loads(request.body)
-        obj_id = company['id']
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        llm_hybrid.weaviate_client.batch.delete_objects(
-            class_name=collection,
-            where={
-                "path": ["id"],
-                "operator": "Like",
-                "valueText": obj_id
-            },
-        )
-
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW REMOVE OBJECT:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_objects_entity(request):
-    try:
-        company = json.loads(request.body)
-        entity = str(company['entity'])
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        llm_hybrid.weaviate_client.batch.delete_objects(
-            class_name=collection,
-            where={
-                "path": ["entity"],
-                "operator": "Like",
-                "valueText": entity
-            },
-        )
-
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW REMOVE OBJECT ENTITY:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_objects_uuid(request):
-    try:
-        company = json.loads(request.body)
-        uid = str(company['uuid'])
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        llm_hybrid.weaviate_client.batch.delete_objects(
-            class_name=collection,
-            where={
-                "path": ["uuid"],
-                "operator": "Like",
-                "valueText": uid
-            },
-        )
-
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW REMOVE OBJECTS UUID:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_collection(request):
-    try:
-        company = json.loads(request.body)
-        collection = "C" + str(company['collection'])
-
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        llm_hybrid.weaviate_client.schema.delete_class(collection)
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW REMOVE COLLECTION:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-# ------------------------- Master Vectors -------------------------
-@api_view(http_method_names=['POST'])
-def create_master_collection(request):
-    try:
-        company = json.loads(request.body)
-
-        if mv.weaviate_client.schema.exists(company['collection']) is True:
-            return Response({'error': 'This collection already exists!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        class_obj = {
-            "class": f"{company['collection']}",
-            "description": f"collection for {company['collection']}",
-            "vectorizer": "text2vec-cohere",
-            "properties": [
+            data_objs = [
                 {
-                    "name": "uuid",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "skip": True,
-                        }
-                    }
-                },
-                {
-                    "name": "filename",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "skip": True,
-                        }
-                    }
-                },
-                {
-                    "name": "content",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "vectorizePropertyName": True,
-                            "model": "embed-multilingual-v3.0",
-                        }
-                    }
-                },
-                {
-                    "name": "type", # EA, Finance data, block chains, .....
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "skip": True
-                        }
-                    }
-                }
-            ],
-        }
+                    "entity": str(entity),
+                    "user_id" : str(user_id),
+                    "content": str(chunk),
+                    "uuid": str(unique_id)
+                } for chunk in batch
+            ]
 
-        mv.weaviate_client.schema.create_class(class_obj)
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            self.weaviate_client.batch.configure(batch_size=100)
+            with self.weaviate_client.batch as batch_data:
+                for data_obj in data_objs:
+                    batch_data.add_data_object(
+                        data_obj,
+                        class_,
+                    )
 
+            return str(unique_id)
+        except Exception as e:
+            print(e)
+            return ""
 
-@api_view(http_method_names=['GET'])
-def get_master_collection(request):
-    try:
-        company = json.loads(request.body)
+    def filter_by(self, key: str, value: str, class_: str):
+        response = (
+            self.weaviate_client.query
+            .get(class_, ["content"])
+            .with_where({
+                'path': [key],
+                'operator': 'Equal',
+                'valueText': value
+            })
 
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = (mv.weaviate_client.query.get(company['collection'], ['uuid', 'filename', 'content', 'type'])
-                       .with_additional(["id"])
-                       .do())
-
-        res = data_object['data']['Get']
-        # print(res)
-        return Response({'msg': res}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_master_objects_filename(request):
-    try:
-        company = json.loads(request.body)
-        filename = company['filename']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = mv.filter_by('filename', filename, collection)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_master_objects_type(request):
-    try:
-        company = json.loads(request.body)
-        type_ = company['type']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = mv.filter_by('type', type_, collection)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_master_objects_uuid(request):
-    try:
-        company = json.loads(request.body)
-        uid = company['uuid']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = mv.filter_by('uuid', uid, collection)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['GET'])
-def get_master_object(request):
-    try:
-        company = json.loads(request.body)
-        obj_id = company['id']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        data_object = mv.get_by_id(collection, obj_id)
-        return Response({'msg': data_object}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_master_object(request):
-    try:
-        company = json.loads(request.body)
-        obj_id = company['id']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        mv.weaviate_client.batch.delete_objects(
-            class_name=collection,
-            where={
-                "path": ["id"],
-                "operator": "Like",
-                "valueText": obj_id
-            },
+            .with_additional("id")
+            .with_limit(self.num_results)
+            .do()
         )
 
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        result = response['data']['Get'][class_]
 
+        return result
 
-@api_view(http_method_names=['POST'])
-def remove_master_collection(request):
-    try:
-        company = json.loads(request.body)
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        mv.weaviate_client.schema.delete_class(collection)
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_master_objects_uuid(request):
-    try:
-        company = json.loads(request.body)
-        uid = company['uuid']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        mv.weaviate_client.batch.delete_objects(
-            class_name=collection,
-            where={
-                "path": ["uuid"],
-                "operator": "Like",
-                "valueText": uid
-            },
+    def get_by_id(self, class_: str, obj_id: str):
+        data_object = self.weaviate_client.data_object.get_by_id(
+            obj_id,
+            class_name=class_,
         )
 
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def remove_master_objects_file(request):
-    try:
-        company = json.loads(request.body)
-        filename = company['filename']
-        collection = company['collection']
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        mv.weaviate_client.batch.delete_objects(
-            class_name=collection,
-            where={
-                "path": ["filename"],
-                "operator": "Like",
-                "valueText": filename
-            },
-        )
-
-        return Response({'msg': 'Success!'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def add_master_vectors(request):
-    try:
-        company = json.loads(request.body)
-
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        documents = slice_document.chunk_corpus(company['text'])
-
-        uid = mv.add_batch(documents, company['filename'], company['type'], company['collection'])
-
-        return Response({'msg': str(uid)}, status=status.HTTP_200_OK)
-    except Exception as e:
-        print("VIEW:")
-        print(e)
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(http_method_names=['POST'])
-def upload_master_file(request):
-    try:
-        data = request.data
-        documents = data.get('chunks')
-        file_name = data.get('filename')
-        doc_type = data.get('type')
-        collection = data.get('collection')
-        
-        if not documents or not file_name or not doc_type or not collection:
-            return Response({'msg': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Add batch processing logic
-        uid = mv.add_batch(documents, file_name, doc_type, collection)
-        
-        return Response({'msg': uid}, status=status.HTTP_201_CREATED)
-    except Exception as e:
-        print("VIEW MASTER UPLOAD FILE:")
-        print(e)
-        return Response({'msg': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-# ----------- WARNING -----------
-@api_view(http_method_names=['POST'])
-def destroy_all(request):
-    llm_hybrid.weaviate_client.schema.delete_all()
-    return Response({'msg': 'Destroyed!!!'}, status=status.HTTP_200_OK)
-
+        return data_object
