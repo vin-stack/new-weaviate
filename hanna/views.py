@@ -79,7 +79,7 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         retriever = ""
         # type -> IN, CMP, MB, PUB, PRV
         if check is True:
-            master_vector = mv.search_master_vectors(query=query, class_="MV001") # 45 -> PUBLIC
+            master_vector = mv.search_master_vectors(query=query, class_="test6") # 45 -> PUBLIC
             company_vector = llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection) # 45 -> PUBLIC
             initiative_vector = llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection) # 45 INID -> PUBLIC
 
