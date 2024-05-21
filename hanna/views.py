@@ -63,39 +63,12 @@ class SimpleCallback(BaseCallbackHandler):
 
 
 @api_view(http_method_names=['POST'])
-def chat_stream(request) -> Response or StreamingHttpResponse:
+def chat_stream(request):
     try:
         company = json.loads(request.body)
         print(company)
-        collection = "C" + str(company['collection'])
-        query = str(company['query'])
-        entity = str(company['entity'])
-        user_id = str(company['user_id'])
 
-        #if llm_hybrid.collection_exists(collection) is False:
-        #    return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        check = llm_hybrid.trigger_vectors(query=query)
-        retriever = ""
-        # type -> IN, CMP, MB, PUB, PRV
-        if check is True:
-            master_vector = mv.search_master_vectors(query=query, class_=collection) # 45 -> PUBLIC
-            company_vector = llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection) # 45 -> PUBLIC
-            initiative_vector = llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection) # 45 INID -> PUBLIC
-
-            combine_ids = "INP" + entity # -> INP70
-
-            member_vector = llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id) # 45, IN+MB, MB -> Private Vec
-
-            # master_vector.extend(company_vector)
-            # member_vector.extend(master_vector)
-            initiative_vector.extend(member_vector) # 90
-            # retriever = initiative_vector
-            top_master_vec = mv.reranker(query=query, batch=master_vector) # 6
-            top_company_vec = llm_hybrid.reranker(query=query, batch=company_vector) # 6
-            top_member_initiative_vec = llm_hybrid.reranker(query=query, batch=initiative_vector, top_k=10) # 10
-
-            retriever = f"{top_master_vec}\n{top_company_vec}\n{top_member_initiative_vec}"
+        retriever = llm_hybrid.search(company['query'], company['collection'], company['entity'],company['user'])
 
         config = {
             'callbacks': [SimpleCallback()]
@@ -106,9 +79,9 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         chain = prompt | llm | StrOutputParser()
 
         response = chain.stream({'matching_model': retriever,
-                                 'question': query,
+                                 'question': company['query'],
                                  'username': company['user'],
-                                 'chat_history': "",
+                                 'chat_history': {},
                                  'language_to_use': company['language']}, config=config)
 
         response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
@@ -116,7 +89,7 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
 
         return response
     except Exception as e:
-        print("VIEW CHAT STREAM:")
+        print("VIEW:")
         print(e)
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
