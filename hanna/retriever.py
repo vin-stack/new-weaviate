@@ -51,7 +51,7 @@ USER PROMPT: {user_prompt}"""
 
     # Comprehensive phrase
 
-    def search(self, query, class_: str, entity: str, user: str):
+    def search(self, query, class_: str,user: str):
         cat = self.__chain_class.run(user_prompt=query)
 
         if self.verbose is True:
@@ -73,7 +73,7 @@ USER PROMPT: {user_prompt}"""
                     .with_where({
                         'path': ['entity'],
                         'operator': 'Equal',
-                        'valueText': entity
+                        
                     })
                     .with_hybrid(
                         query=filter_query,
