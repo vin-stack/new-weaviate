@@ -666,21 +666,18 @@ def add_master_vectors(request):
 @api_view(http_method_names=['POST'])
 def upload_master_file(request):
     try:
-        data_file = request.FILES['file_upload']
-        print(f'File Upload! {data_file}')
-        print(request.POST)
+        data = request.data
+        documents = data.get('chunks')
+        file_name = data.get('filename')
+        doc_type = data.get('type')
+        collection = data.get('collection')
+        
+        if not documents or not file_name or not doc_type or not collection:
+            return Response({'msg': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
 
-        file_name = data_file.name
-
-        destination = open("./_tmp/" + file_name, 'wb+')
-        for chunk in data_file.chunks():
-            destination.write(chunk)
-        destination.close()
-
-        documents = slice_document.chunk_document(file_name)
-
-        uid = mv.add_batch(documents, str(file_name), request.POST.get('type'), request.POST.get('collection'))
-        os.remove("./_tmp/" + file_name)
+        # Add batch processing logic
+        uid = mv.add_batch(documents, file_name, doc_type, collection)
+        
         return Response({'msg': uid}, status=status.HTTP_201_CREATED)
     except Exception as e:
         print("VIEW MASTER UPLOAD FILE:")
