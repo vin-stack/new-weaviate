@@ -72,8 +72,7 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         entity = str(company['entity'])
         user_id = str(company['user_id'])
 
-        if llm_hybrid.collection_exists(collection) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
+        
 
         check = llm_hybrid.trigger_vectors(query=query)
         retriever = ""
