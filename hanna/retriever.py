@@ -158,7 +158,7 @@ USER PROMPT: {user_prompt}"""
                 .do()
             )
 
-            if not response or response != []:
+            if not response or response != [] or 'data' in response:
                 print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
 
@@ -200,7 +200,7 @@ USER PROMPT: {user_prompt}"""
                 .do()
             )
 
-            if not response or response != []:
+            if not response or response != [] or 'data' in response:
                 print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
                 if result is not None:
@@ -241,7 +241,7 @@ USER PROMPT: {user_prompt}"""
                 .do()
             )
 
-            if not response or response != []:
+            if not response or response != [] or 'data' in response:
                 print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
                 if result is not None:
@@ -330,4 +330,3 @@ USER PROMPT: {user_prompt}"""
         )
 
         return data_object
-
