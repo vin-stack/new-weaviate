@@ -121,6 +121,7 @@ USER PROMPT: {user_prompt}"""
 
         self.weaviate_client.schema.create_class(class_obj)
 
+
     def search_vectors_user(self, query: str, class_: str, entity: str, user_id: str, show_score: bool = False) -> list:
         try:
             weaviate_result = []
@@ -157,7 +158,7 @@ USER PROMPT: {user_prompt}"""
                 .do()
             )
 
-            if not response or response != [] or 'data' in response:
+            if not response or response != []:
                 print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
 
@@ -199,7 +200,7 @@ USER PROMPT: {user_prompt}"""
                 .do()
             )
 
-            if not response or response != [] or 'data' in response:
+            if not response or response != []:
                 print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
                 if result is not None:
@@ -240,7 +241,7 @@ USER PROMPT: {user_prompt}"""
                 .do()
             )
 
-            if not response or response != [] or 'data' in response:
+            if not response or response != []:
                 print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
                 if result is not None:
@@ -329,3 +330,4 @@ USER PROMPT: {user_prompt}"""
         )
 
         return data_object
+
