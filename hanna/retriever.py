@@ -1,3 +1,4 @@
+from cohere import RerankResponseResultsItem
 from dotenv import load_dotenv
 from django.conf import settings
 from langchain_openai import ChatOpenAI
@@ -7,20 +8,20 @@ from .credentials import ClientCredentials
 import uuid
 import re
 
-
 load_dotenv()
 
 
 class LLMHybridRetriever(ClientCredentials):
 
-    def __init__(self, alpha: float = 0.8, num_results: int = 45, verbose: bool = False):
+    def __init__(self, alpha: float = 0.8, num_results: int = 60, top_n: int = 6, verbose: bool = False):
         super(LLMHybridRetriever, self).__init__()
 
         self.alpha = alpha
         self.num_results = num_results
+        self.top_n = top_n
         self.verbose = verbose
 
-        self.__llm_class = ChatOpenAI(openai_api_key=settings.OPENAI_API_KEY,
+        self.__llm_class = ChatOpenAI(openai_api_key = settings.OPENAI_API_KEY,
                                       model_name=settings.GPT_MODEL,
                                       openai_api_base=settings.BASE_URL,
                                       temperature=0.4,
@@ -42,7 +43,6 @@ General Knowledge
 Context Required
 Ambiguous
 
-
 USER PROMPT: {user_prompt}"""
 
         self.__prompt_class = PromptTemplate.from_template(self.__PROMPT_CLASS)
@@ -51,7 +51,7 @@ USER PROMPT: {user_prompt}"""
 
     # Comprehensive phrase
 
-    def trigger_vectors(self, query: str) -> bool:
+    def search(self, query, class_: str, entity: str, user: str):
         cat = self.__chain_class.run(user_prompt=query)
 
         if self.verbose is True:
@@ -62,230 +62,71 @@ USER PROMPT: {user_prompt}"""
                 or "Specific Domain Knowledge" in cat \
                 or "Organizational Change or Organizational Management" in cat \
                 or "Opinion or Subjective" in cat:
-
             if "Ambiguous" in cat and "Context Required" in cat:
-                return False
+                return ""
             else:
-                return True
+                filter_query = re.sub(r"\\", "", query)
 
-    def collection_exists(self, class_: str) -> bool:
-        return True if self.weaviate_client.schema.exists(class_) is True else False
-
-    def add_collection(self, class_: str) -> None:
-        class_obj = {
-            "class": class_,
-            "description": f"collection for {class_}",
-            "vectorizer": "text2vec-cohere",
-            "properties": [
-                {
-                    "name": "uuid",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "skip": True,
-                        }
-                    }
-                },
-                {
-                    "name": "entity",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "skip": True,
-                        }
-                    }
-                },
-
-                {
-                    "name": "user_id",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "skip": True,
-
-                        }
-                    }
-                },
-                {
-                    "name": "content",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-cohere": {
-                            "vectorizePropertyName": True,
-                            "model": "embed-multilingual-v3.0",
-                        }
-                    }
-                }
-            ],
-        }
-
-        self.weaviate_client.schema.create_class(class_obj)
-
-
-    def search_vectors_user(self, query: str, class_: str, entity: str, user_id: str, show_score: bool = False) -> list:
-        try:
-            weaviate_result = []
-
-            filter_query = re.sub(r"\\", "", query).lower()
-
-            response = (
-                self.weaviate_client.query
-                .get(class_, ["content"])
-                .with_where(
-                    {
-                        "operator": "And",
-                        "operands": [
-                            {
-                                "path": ["entity"],
-                                "operator": "Equal",
-                                "valueText": entity,
-                            },
-                            {
-                                "path": ["user_id"],
-                                "operator": "Equal",
-                                "valueText": user_id,
-                            },
-                        ]
-                    }
+                response = (
+                    self.weaviate_client.query
+                    .get(class_, ["content"])
+                    .with_where({
+                        'path': ['entity'],
+                        'operator': 'Equal',
+                        'valueText': entity
+                    })
+                    .with_hybrid(
+                        query=filter_query,
+                        alpha=self.alpha,
+                    )
+                    # .with_additional("score")
+                    .with_limit(self.num_results)
+                    .do()
                 )
 
-                .with_hybrid(
-                    query=filter_query,
-                    alpha=self.alpha,
-                )
-                # .with_additional("score")
-                .with_limit(self.num_results)
-                .do()
-            )
-
-            if not response or response != []:
-                print("FOUND VECTORS!")
                 result = response['data']['Get'][class_]
+                weaviate_result = []
+                ranked_result = []
 
                 if result is not None:
                     for chunk in result:
                         weaviate_result.append(chunk['content'])
 
-                return weaviate_result
-            else:
-                print("NO RESULTS FOUND!")
-                return []
-        except Exception as e:
-            print(f"CLASS LLMHYBRID -> USER VEC: {e}")
-            return []
+                    results = self.cohere_client.rerank(
+                        query=query,
+                        documents=weaviate_result,
+                        top_n=self.top_n,
+                        model='rerank-english-v2.0',
+                        return_documents=True)
+                    
+                    company_weight = 0.3
+                    entity_weight = 0.3
+                    user_weight = 0.3
+                    update_results=[]
+                    for document in results.results:
+                        relevance_score = document.relevance_score
+                        overall_score = (company_weight * relevance_score) + (entity_weight * relevance_score) + (user_weight * relevance_score)
+                        doc = RerankResponseResultsItem(index=document.index, relevance_score=relevance_score, overall_score = overall_score, text=document.document.text if hasattr(document,'document') and hasattr(document.document, 'text') else None)
+                        update_results.append(doc)
+                    update_results.sort(key=lambda x: x.overall_score, reverse=True)
+                    
+                    for chunk in update_results:
+                        ranked_result.append(chunk.text)
 
-    def search_vectors_initiative(self, query: str, class_: str, entity: str) -> list:
-        try:
-            weaviate_result = []
+                    return "\n".join(ranked_result)
+                else:
+                    return ""
+        else:
+            return ""
 
-            filter_query = re.sub(r"\\", "", query).lower()
-
-            response = (
-                self.weaviate_client.query
-                .get(class_, ["content"])
-                .with_where(
-                    {
-                        "path": ["entity"],
-                        "operator": "Equal",
-                        "valueText": entity,
-                    }
-                )
-
-                .with_hybrid(
-                    query=filter_query,
-                    alpha=self.alpha,
-                )
-                # .with_additional("score")
-                .with_limit(self.num_results)
-                .do()
-            )
-
-            if not response or response != []:
-                print("FOUND VECTORS!")
-                result = response['data']['Get'][class_]
-                if result is not None:
-                    for chunk in result:
-                        weaviate_result.append(chunk['content'])
-
-                return weaviate_result
-            else:
-                print("NO RESULTS FOUND!")
-                return []
-        except Exception as e:
-            print(f"CLASS LLMHYBRID -> INIT VEC: {e}")
-            return []
-
-    def search_vectors_company(self, query: str, class_: str, entity: str) -> list:
-        try:
-            weaviate_result = []
-
-            filter_query = re.sub(r"\\", "", query).lower()
-
-            response = (
-                self.weaviate_client.query
-                .get(class_, ["content"])
-                .with_where(
-                    {
-                        "path": ["entity"],
-                        "operator": "Equal",
-                        "valueText": entity,
-                    }
-                )
-
-                .with_hybrid(
-                    query=filter_query,
-                    alpha=self.alpha,
-                )
-                # .with_additional("score")
-                .with_limit(self.num_results)
-                .do()
-            )
-
-            if not response or response != []:
-                print("FOUND VECTORS!")
-                result = response['data']['Get'][class_]
-                if result is not None:
-                    for chunk in result:
-                        weaviate_result.append(chunk['content'])
-
-                return weaviate_result
-            else:
-                print("NO RESULTS FOUND!")
-                return []
-        except Exception as e:
-            print(f"CLASS LLMHYBRID -> COMP VEC: {e}")
-            return []
-
-    def reranker(self, query: str, batch: list, top_k: int = 6, return_type: type = str) -> str or list:
-        try:
-            if not batch:
-                return "\n\n".join(batch) if return_type == str else batch
-
-            ranked_results = []
-
-            results = self.cohere_client.rerank(
-                query=query,
-                documents=batch,
-                top_n=top_k,
-                model='rerank-english-v2.0',
-                return_documents=True)
-
-            for document in results.results:
-                ranked_results.append(document.document.text)
-
-            return "\n\n".join(ranked_results) if return_type == str else ranked_results
-        except Exception as e:
-            print(e)
-            return [] if return_type == list else ""
-
-    def add_batch(self, batch: list, user_id: str, entity: str, class_: str) -> str:
+    def add_batch(self, batch: list, user_id: str, entity: str, class_: str):
         try:
             unique_id = uuid.uuid4()
 
             data_objs = [
                 {
                     "entity": str(entity),
-                    "user_id": str(user_id),
+                    "user_id" : str(user_id),
                     "content": str(chunk),
                     "uuid": str(unique_id)
                 } for chunk in batch
@@ -330,4 +171,3 @@ USER PROMPT: {user_prompt}"""
         )
 
         return data_object
-
