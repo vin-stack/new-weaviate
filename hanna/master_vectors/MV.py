@@ -82,22 +82,28 @@ USER PROMPT: {user_prompt}"""
             .do()
         )
 
-        result = response['data']['Get'][class_]
-        weaviate_result = []
+        if response or response == [] or 'data' not in response:
+            return []
+        else:
+            result = response['data']['Get'][class_]
+            weaviate_result = []
 
-        for chunk in result:
-            weaviate_result.append(chunk['content'])
+            for chunk in result:
+                weaviate_result.append(chunk['content'])
 
-        return weaviate_result
+            return weaviate_result
 
-    def reranker(self, query: str, batch: str) -> str:
+    def reranker(self, query: str, batch: str, top_k: int = 6, return_type: type = str) -> str or list:
 
         ranked_result = []
+
+        if not batch:
+            return "\n\n".join(batch) if return_type == str else batch
 
         results = self.cohere_client.rerank(
             query=query,
             documents=batch,
-            top_n=self.top_n,
+            top_n=top_k,
             model='rerank-english-v2.0',
             return_documents=True)
 
@@ -157,4 +163,3 @@ USER PROMPT: {user_prompt}"""
             class_name=class_,
         )
         return data_object
-
