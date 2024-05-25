@@ -121,7 +121,6 @@ USER PROMPT: {user_prompt}"""
 
         self.weaviate_client.schema.create_class(class_obj)
 
-
     def search_vectors_user(self, query: str, class_: str, entity: str, user_id: str, show_score: bool = False) -> list:
         try:
             weaviate_result = []
