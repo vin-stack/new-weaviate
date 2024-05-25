@@ -5,6 +5,7 @@ urlpatterns = [
     path('', views.home, name='home'),
 
     path('chat/', views.chat_stream, name='chat'),
+    path('chat-note/', views.chatnote_stream, name='chat-note'),
 
     path('create-collection/', views.create_collection),
     path('add-object/text/', views.add_vectors),
