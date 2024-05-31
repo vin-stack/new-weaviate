@@ -13,6 +13,7 @@ from .master_vectors.MV import MasterVectors
 from .chunker import ChunkText
 from dotenv import load_dotenv
 import json
+from .tasks import add_master_vectors_task
 
 load_dotenv()
 
@@ -709,19 +710,35 @@ def remove_master_objects_file(request):
         return Response({'error': 'something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+#@api_view(http_method_names=['POST'])
+#def add_master_vectors(request):
+#    try:
+#        company = json.loads(request.body)
+#
+#        if mv.weaviate_client.schema.exists(company['collection']) is False:
+#            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
+#
+#        documents = slice_document.chunk_corpus(company['text'])
+#
+#        uid = mv.add_batch(documents, company['filename'], company['type'], company['collection'])
+#
+#        return Response({'msg': str(uid)}, status=status.HTTP_200_OK)
+#    except Exception as e:
+#        print("VIEW:")
+#        print(e)
+#        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
 @api_view(http_method_names=['POST'])
 def add_master_vectors(request):
     try:
         company = json.loads(request.body)
 
-        if mv.weaviate_client.schema.exists(company['collection']) is False:
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
+        # call the Celery task asynchronously
+        result = add_master_vectors_task.apply_async(args=[company])
 
-        documents = slice_document.chunk_corpus(company['text'])
-
-        uid = mv.add_batch(documents, company['filename'], company['type'], company['collection'])
-
-        return Response({'msg': str(uid)}, status=status.HTTP_200_OK)
+        return Response({'task_id': result.id}, status=status.HTTP_202_ACCEPTED)
     except Exception as e:
         print("VIEW:")
         print(e)
