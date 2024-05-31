@@ -1,4 +1,4 @@
-from celery import task
+from celery import shared_task
 from .master_vectors.MV import MasterVectors
 mv = MasterVectors()
 
