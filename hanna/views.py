@@ -730,18 +730,19 @@ def remove_master_objects_file(request):
 
 
 
+@api_view(http_method_names=['POST'])
+def add_master_vectors(request):
+    try:
+        company = json.loads(request.body)
 
+        # call the Celery task asynchronously
+        result = add_master_vectors_task.apply_async(args=[company])
 
-class AddMasterVectors(APIView):
-    def post(self, request):
-        try:
-            company_data = request.body
-            add_master_vectors_task.delay(company_data)
-            return Response({'msg': 'Task queued for processing.'}, status=status.HTTP_202_ACCEPTED)
-        except Exception as e:
-            print("VIEW:")
-            print(e)
-            return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'task_id': result.id}, status=status.HTTP_202_ACCEPTED)
+    except Exception as e:
+        print("VIEW:")
+        print(e)
+        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(http_method_names=['POST'])
