@@ -461,5 +461,5 @@ xkit==0.0.0
 yarl==1.9.4
 zipp==1.0.0
 zope.interface==5.4.0
-celery==4.4.7
-redis==2.10.3
+celery
+redis
