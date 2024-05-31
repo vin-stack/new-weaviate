@@ -1,8 +1,8 @@
-from celery import task
+from celery import shared_task
 from .master_vectors.MV import MasterVectors
 mv = MasterVectors()
 
-@task()
+@shared_task()
 def add_master_vectors_task(company):
     """
     A Celery task that adds master vectors to the Weaviate database
