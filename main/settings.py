@@ -110,9 +110,7 @@ TEMPLATES = [
     },
 ]
 
-REDIS_URL = 'redis://localhost:6379/0'  # or use the Heroku-provided REDIS_URL env var
 
-CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = 'redis'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
