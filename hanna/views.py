@@ -14,6 +14,7 @@ from .chunker import ChunkText
 from dotenv import load_dotenv
 import json
 from .tasks import add_master_vectors_task
+from .credentials import ClientCredentials
 
 load_dotenv()
 
@@ -427,7 +428,7 @@ def remove_objects_uuid(request):
         if llm_hybrid.collection_exists(collection) is False:
             return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
 
-        llm_hybrid.weaviate_client.batch.delete_objects(
+        credentials.weaviate_client.batch.delete_objects(
             class_name=collection,
             where={
                 "path": ["uuid"],
