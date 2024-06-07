@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 import json
 from .tasks import add_master_vectors_task
 from .credentials import ClientCredentials
-
+credentials = ClientCredentials()
 load_dotenv()
 
 file = open("system-prompt.txt", "r")
