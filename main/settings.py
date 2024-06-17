@@ -28,7 +28,6 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-
 ALLOWED_HOSTS = ["*"]
 
 # CORS_ALLOWED_ORIGINS = []
@@ -36,6 +35,8 @@ ALLOWED_HOSTS = ["*"]
 # Application definition
 
 INSTALLED_APPS = [
+    'channels',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -83,8 +84,8 @@ REST_FRAMEWORK = {
 }
 
 OPENAI_API_KEY = os.environ.get('DEEPINFRA')
-GPT_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-# GPT_MODEL = "cognitivecomputations/dolphin-2.6-mixtral-8x7b"
+GPT_MODEL_1 = "mistralai/Mixtral-8x7B-Instruct-v0.1" # Classification
+GPT_MODEL_2 = "mistralai/Mixtral-8x22B-Instruct-v0.1" # Question Answering
 BASE_URL = "https://api.deepinfra.com/v1/openai"
 COHERE_API_KEY = os.environ.get("COHERE_API_KEY")
 WEAVIATE_API_KEY = os.environ.get('WEAVIATE_API_KEY')
@@ -110,14 +111,7 @@ TEMPLATES = [
     },
 ]
 
-
-CELERY_RESULT_BACKEND = 'redis'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-
-
-WSGI_APPLICATION = 'main.wsgi.application'
+ASGI_APPLICATION = 'main.asgi.application'
 
 
 # Database
@@ -182,5 +176,16 @@ CORS_ALLOW_METHODS = ["GET", "POST", "OPTIONS"]
 # Allow specific headers
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization"]
 
-INSTALLED_APPS += ['channels']
-ASGI_APPLICATION = 'main.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
