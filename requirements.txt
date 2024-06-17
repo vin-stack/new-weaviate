@@ -95,3 +95,7 @@ weaviate-client==4.5.5
 yarl==1.9.4
 celery
 redis
+daphne
+channels
+channels_redis
+
