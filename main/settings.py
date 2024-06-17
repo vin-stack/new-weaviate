@@ -181,3 +181,6 @@ CORS_ALLOW_METHODS = ["GET", "POST", "OPTIONS"]
 
 # Allow specific headers
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization"]
+
+INSTALLED_APPS += ['channels']
+ASGI_APPLICATION = 'main.asgi.application'
