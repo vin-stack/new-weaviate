@@ -1,4 +1,3 @@
-
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 import asyncio
@@ -11,12 +10,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
         pass
 
     async def receive(self, text_data):
-        text_data_json = json.loads(text_data)
-        message = text_data_json['message']
+        try:
+            text_data_json = json.loads(text_data)
+            message = text_data_json.get('message', '')
 
-        # Simulate response generation
-        for i in range(5):
+            # Simulate response generation
+            for i in range(5):
+                await self.send(text_data=json.dumps({
+                    'message': f'Part {i+1}: {message}'
+                }))
+                await asyncio.sleep(1)  # Simulate delay
+
+        except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
-                'message': f'Part {i+1}: {message}'
+                'error': 'Invalid JSON'
             }))
-            await asyncio.sleep(1)  # Simulate delay
+        except Exception as e:
+            await self.send(text_data=json.dumps({
+                'error': str(e)
+            }))
