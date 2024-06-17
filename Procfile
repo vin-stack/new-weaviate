@@ -1,3 +1,4 @@
 release: python manage.py migrate
 web: gunicorn main.wsgi --threads=2
-worker: celery -A main worker --loglevel=info --queues=master_vectors
+web: daphne -b 0.0.0.0 -p $PORT main.asgi:application
+
