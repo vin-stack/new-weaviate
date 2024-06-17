@@ -1,7 +1,10 @@
 from django.urls import path
 from . import views
+from django.urls import include, re_path
+import hanna.routing
 
 urlpatterns = [
+    re_path(r'ws/', include(hanna.routing.websocket_urlpatterns)),
     path('', views.home, name='home'),
 
     path('chat/', views.chat_stream, name='chat'),
@@ -11,9 +14,12 @@ urlpatterns = [
     path('add-object/text/', views.add_vectors),
     path('add-object/file/', views.upload_file),
 
+    path('update-object/', views.update_chunk),
+
     path('remove-object/', views.remove_object),
     path('remove-objects/entity/', views.remove_objects_entity),
     path('remove-objects/uuid/', views.remove_objects_uuid),
+    path('remove-objects/uuids/', views.remove_objects_uuids),
     path('remove-collection/', views.remove_collection),
 
     path('get-object/', views.get_object),
