@@ -121,3 +121,6 @@ wcwidth==0.2.13
 weaviate-client==4.5.5
 wrapt==1.16.0
 yarl==1.9.4
+daphne
+channels
+
