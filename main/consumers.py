@@ -14,12 +14,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
             text_data_json = json.loads(text_data)
             message = text_data_json.get('message', '')
 
-            # Simulate response generation
-            for i in range(5):
+            if message:
+                # Simulate response generation
+                for i in range(5):
+                    await self.send(text_data=json.dumps({
+                        'responseText': f'Part {i+1}: {message}'
+                    }))
+                    await asyncio.sleep(1)  # Simulate delay
+            else:
                 await self.send(text_data=json.dumps({
-                    'message': f'Part {i+1}: {message}'
+                    'responseText': 'No message received'
                 }))
-                await asyncio.sleep(1)  # Simulate delay
 
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
