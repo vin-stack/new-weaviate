@@ -1,16 +1,20 @@
 from .credentials import ClientCredentials
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from PyPDF2 import PdfReader
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core import Document
+from pypdf import PdfReader
 import docx
 import io
 
 
 class ChunkText(ClientCredentials):
-    def __init__(self, size: int = 1300):
+    def __init__(self, size: int = 300):
         super(ChunkText).__init__()
         self.dir = "./_tmp/"
 
-        self.__rcts = RecursiveCharacterTextSplitter(chunk_overlap=0, chunk_size=size, length_function=len)
+        self.__rcts = SentenceSplitter(chunk_size=size)
+
+        # RecursiveCharacterTextSplitter(chunk_overlap=0, chunk_size=size, length_function=len)
 
     def chunk_document(self, path: str):
         corpus = ""
@@ -43,6 +47,8 @@ class ChunkText(ClientCredentials):
 
     def chunk_corpus(self, text: str):
 
-        split_text = self.__rcts.split_text(text)
+        # split_text = self.__rcts.split_text(text)
+        chunks = self.__rcts.get_nodes_from_documents([Document(text=text)])
+        nodes = [chunk.text for chunk in chunks]
 
-        return split_text
+        return nodes
