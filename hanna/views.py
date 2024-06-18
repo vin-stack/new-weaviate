@@ -93,7 +93,7 @@ mv = MasterVectors()
 slice_document = ChunkText()
 
 @api_view(http_method_names=['POST'])
-async def chat_stream(request) -> Response or StreamingHttpResponse:
+async def chat_stream(request):
     try:
         company = json.loads(request.body)
         collection = "C" + str(company['collection'])
@@ -133,7 +133,7 @@ async def chat_stream(request) -> Response or StreamingHttpResponse:
 
         chain = prompt | llm | StrOutputParser()
 
-        response_stream = chain.stream({
+        response_stream = await chain.stream({
             'matching_model': retriever,
             'question': query,
             'username': company['user'],
@@ -151,7 +151,7 @@ async def chat_stream(request) -> Response or StreamingHttpResponse:
 
 
 @api_view(http_method_names=['POST'])
-async def chatnote_stream(request) -> Response or StreamingHttpResponse:
+async def chatnote_stream(request):
     try:
         company = json.loads(request.body)
         collection = "C" + str(company['collection'])
@@ -187,7 +187,7 @@ async def chatnote_stream(request) -> Response or StreamingHttpResponse:
 
         chain = chat_note_prompt | llm | StrOutputParser()
 
-        response = chain.stream({
+        response_stream = await chain.stream({
             'matching_model': retriever,
             'question': query,
             'username': company['user'],
@@ -195,13 +195,14 @@ async def chatnote_stream(request) -> Response or StreamingHttpResponse:
             'language_to_use': company['language']
         })
 
-        response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
+        response = StreamingHttpResponse(response_stream, status=status.HTTP_200_OK, content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'
 
         return response
     except Exception as e:
         logger.error(f"Error in chatnote_stream: {e}")
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     
 @api_view(http_method_names=['POST'])
 def create_collection(request) -> Response:
