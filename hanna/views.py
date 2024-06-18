@@ -1,4 +1,5 @@
-import os
+import logging
+import json
 from django.http import StreamingHttpResponse
 from django.conf import settings
 from rest_framework.decorators import api_view
@@ -11,14 +12,13 @@ from .retriever import LLMHybridRetriever
 from .master_vectors.MV import MasterVectors
 from .chunker import ChunkText
 from dotenv import load_dotenv
-import json
 from .credentials import ClientCredentials
 from langchain.callbacks.tracers import ConsoleCallbackHandler
 
 load_dotenv()
-import logging
 
 logger = logging.getLogger(__name__)
+
 credentials = ClientCredentials()
 
 with open("test-prompt.txt", "r") as file:
@@ -42,10 +42,6 @@ llm = ChatOpenAI(
 llm_hybrid = LLMHybridRetriever(verbose=True)
 mv = MasterVectors()
 slice_document = ChunkText()
-
-@api_view(http_method_names=['GET'])
-def home(request) -> Response:
-    return Response({'msg': 'this is hanna enterprise suite'}, status=status.HTTP_200_OK)
 
 @api_view(http_method_names=['POST'])
 async def chat_stream(request) -> Response or StreamingHttpResponse:
@@ -88,7 +84,7 @@ async def chat_stream(request) -> Response or StreamingHttpResponse:
 
         chain = prompt | llm | StrOutputParser()
 
-        response = chain.stream({
+        response_stream = chain.stream({
             'matching_model': retriever,
             'question': query,
             'username': company['user'],
@@ -96,7 +92,7 @@ async def chat_stream(request) -> Response or StreamingHttpResponse:
             'language_to_use': company['language']
         }, config=config)
 
-        response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
+        response = StreamingHttpResponse(response_stream, status=status.HTTP_200_OK, content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'
 
         return response
@@ -104,58 +100,6 @@ async def chat_stream(request) -> Response or StreamingHttpResponse:
         logger.error(f"Error in chat_stream: {e}")
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(http_method_names=['POST'])
-async def chatnote_stream(request) -> Response or StreamingHttpResponse:
-    try:
-        company = json.loads(request.body)
-        collection = "C" + str(company['collection'])
-        query = str(company['query'])
-        entity = str(company['entity'])
-        user_id = str(company['user_id'])
-
-        if not await llm_hybrid.collection_exists(collection):
-            return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
-
-        cat = await llm_hybrid.trigger_vectors(query=query)
-
-        master_vector, company_vector, initiative_vector, member_vector = [], [], [], []
-        combine_ids = "INP" + entity
-
-        if any(c in cat for c in ["Specific Domain Knowledge", "Organizational Change or Organizational Management", 
-                                  "Definitional Questions", "Context Required"]):
-            master_vector = await mv.search_master_vectors(query=query, class_="MV001")
-            company_vector = await llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection)
-            initiative_vector = await llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection)
-            member_vector = await llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id)
-        elif any(c in cat for c in ["Individuals", "Personal Information"]):
-            company_vector = await llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection)
-            initiative_vector = await llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection)
-            member_vector = await llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id)
-
-        initiative_vector.extend(member_vector)
-        top_master_vec = await mv.reranker(query=query, batch=master_vector)
-        top_company_vec = await llm_hybrid.reranker(query=query, batch=company_vector)
-        top_member_initiative_vec = await llm_hybrid.reranker(query=query, batch=initiative_vector, top_k=10)
-
-        retriever = f"{top_master_vec}\n{top_company_vec}\n{top_member_initiative_vec}"
-
-        chain = chat_note_prompt | llm | StrOutputParser()
-
-        response = chain.stream({
-            'matching_model': retriever,
-            'question': query,
-            'username': company['user'],
-            'chat_history': "",
-            'language_to_use': company['language']
-        })
-
-        response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
-        response['Cache-Control'] = 'no-cache'
-
-        return response
-    except Exception as e:
-        logger.error(f"Error in chatnote_stream: {e}")
-        return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 @api_view(http_method_names=['POST'])
 def create_collection(request) -> Response:
