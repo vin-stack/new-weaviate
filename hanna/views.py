@@ -43,6 +43,27 @@ llm_hybrid = LLMHybridRetriever(verbose=True)
 mv = MasterVectors()
 slice_document = ChunkText()
 
+@api_view(http_method_names=['GET'])
+def home(request) -> Response:
+    return Response({'msg': 'this is hanna enterprise suite'}, status=status.HTTP_200_OK)
+
+
+class SimpleCallback(BaseCallbackHandler):
+
+    async def on_llm_start(self, serialized, prompts, **kwargs):
+        if settings.DEBUG is True:
+            print(f"The LLM has Started")
+
+    async def on_llm_end(self, *args, **kwargs):
+
+        if settings.DEBUG is True:
+            print("The LLM has ended!")
+
+
+# async def return_vectors(query: str, class_: str, entity: str, user_id: str) -> str:
+#     return retriever
+
+
 @api_view(http_method_names=['POST'])
 async def chat_stream(request) -> Response or StreamingHttpResponse:
     try:
