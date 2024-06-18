@@ -241,4 +241,15 @@ class LLMHybridRetriever(ClientCredentials):
         except Exception as e:
             print("UUID CHECK: ", e)
             return False
+    async def get_by_id(self, class_: str, obj_id: str):
+        try:
+            data_object = await asyncio.to_thread(
+                self.weaviate_client.data_object.get_by_id,
+                obj_id,
+                class_name=class_
+            )
+            return data_object
+        except Exception as e:
+            print(f"Error in get_by_id: {e}")
+            return None
 
