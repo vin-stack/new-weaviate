@@ -16,7 +16,9 @@ from .credentials import ClientCredentials
 from langchain.callbacks.tracers import ConsoleCallbackHandler
 
 load_dotenv()
+import logging
 
+logger = logging.getLogger(__name__)
 credentials = ClientCredentials()
 
 with open("test-prompt.txt", "r") as file:
@@ -99,8 +101,7 @@ async def chat_stream(request) -> Response or StreamingHttpResponse:
 
         return response
     except Exception as e:
-        print("VIEW CHAT STREAM:")
-        print(e)
+        logger.error(f"Error in chat_stream: {e}")
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(http_method_names=['POST'])
@@ -153,11 +154,9 @@ async def chatnote_stream(request) -> Response or StreamingHttpResponse:
 
         return response
     except Exception as e:
-        print("VIEW CHAT NOTE STREAM:")
-        print(e)
+        logger.error(f"Error in chatnote_stream: {e}")
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
+    
 @api_view(http_method_names=['POST'])
 def create_collection(request) -> Response:
     try:
