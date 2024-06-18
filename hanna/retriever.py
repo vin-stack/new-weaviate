@@ -152,29 +152,29 @@ class LLMHybridRetriever(ClientCredentials):
             return []
 
     async def reranker(self, query: str, batch: list, top_k: int = 6, return_type: type = str) -> str or list:
-    try:
-        if not batch:
-            return "\n\n".join(batch) if return_type == str else batch
+        try:
+            if not batch:
+                return "\n\n".join(batch) if return_type == str else batch
 
-        ranked_results = []
+            ranked_results = []
 
-        results = await asyncio.to_thread(
-            self.cohere_client.rerank,
-            query=query,
-            documents=batch,
-            top_n=top_k,
-            model='rerank-english-v2.0',
-            return_documents=True
-        )
+            results = await asyncio.to_thread(
+                self.cohere_client.rerank,
+                query=query,
+                documents=batch,
+                top_n=top_k,
+                model='rerank-english-v2.0',
+                return_documents=True
+            )
 
-        for document in results.results:
-            if float(document.relevance_score) >= self.threshold:
-                ranked_results.append(document.document.text)
+            for document in results.results:
+                if float(document.relevance_score) >= self.threshold:
+                    ranked_results.append(document.document.text)
 
-        return "\n\n".join(ranked_results) if return_type == str else ranked_results
-    except Exception as e:
-        print(e)
-        return [] if return_type == list else ""
+            return "\n\n".join(ranked_results) if return_type == str else ranked_results
+        except Exception as e:
+            print(e)
+            return [] if return_type == list else ""
 
     async def add_batch(self, batch: list, user_id: str, entity: str, class_: str) -> str:
         try:
@@ -242,15 +242,15 @@ class LLMHybridRetriever(ClientCredentials):
             print("UUID CHECK: ", e)
             return False
     async def get_by_id(self, class_: str, obj_id: str):
-    try:
-        data_object = await asyncio.to_thread(
-            self.weaviate_client.data_object.get_by_id,
-            obj_id,
-            class_name=class_
-        )
-        return data_object
-    except Exception as e:
-        print(f"Error in get_by_id: {e}")
-        return None
+        try:
+            data_object = await asyncio.to_thread(
+                self.weaviate_client.data_object.get_by_id,
+                obj_id,
+                class_name=class_
+            )
+            return data_object
+        except Exception as e:
+            print(f"Error in get_by_id: {e}")
+            return None
 
 
