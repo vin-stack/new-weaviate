@@ -47,50 +47,6 @@ slice_document = ChunkText()
 def home(request) -> Response:
     return Response({'msg': 'this is hanna enterprise suite'}, status=status.HTTP_200_OK)
 
-import logging
-import json
-from django.http import StreamingHttpResponse
-from django.conf import settings
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
-from .retriever import LLMHybridRetriever
-from .master_vectors.MV import MasterVectors
-from .chunker import ChunkText
-from dotenv import load_dotenv
-from .credentials import ClientCredentials
-from langchain.callbacks.tracers import ConsoleCallbackHandler
-
-load_dotenv()
-
-logger = logging.getLogger(__name__)
-
-credentials = ClientCredentials()
-
-with open("test-prompt.txt", "r") as file:
-    SYSPROMPT = file.read()
-
-with open("chatnote-prompt.txt", "r") as read_prompt:
-    CHATNOTE_PROMPT = read_prompt.read()
-
-prompt = PromptTemplate.from_template(SYSPROMPT)
-chat_note_prompt = PromptTemplate.from_template(CHATNOTE_PROMPT)
-
-llm = ChatOpenAI(
-    openai_api_key=settings.OPENAI_API_KEY,
-    model_name=settings.GPT_MODEL_2,
-    openai_api_base=settings.BASE_URL,
-    temperature=0.4,
-    max_tokens=1000,
-    streaming=True
-)
-
-llm_hybrid = LLMHybridRetriever(verbose=True)
-mv = MasterVectors()
-slice_document = ChunkText()
 
 @api_view(http_method_names=['POST'])
 async def chat_stream(request):
@@ -149,7 +105,6 @@ async def chat_stream(request):
         logger.error(f"Error in chat_stream: {e}")
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @api_view(http_method_names=['POST'])
 async def chatnote_stream(request):
     try:
@@ -202,7 +157,6 @@ async def chatnote_stream(request):
     except Exception as e:
         logger.error(f"Error in chatnote_stream: {e}")
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
     
 @api_view(http_method_names=['POST'])
 def create_collection(request) -> Response:
