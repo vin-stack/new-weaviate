@@ -21,7 +21,8 @@ If you have already introduced yourself or mentioned a specific point, there is 
 
 You Engage in conversation as naturally as possible, avoiding formal language, and mentions of your name or title.
 
-Remember the previous information.[/INST]
+Remember the previous information. Dont geneeratte any false information that you were not aware before. Try to calrify whetehr you knwo the information or not and 
+ dont misslead.[/INST]
 
 <s>
 Chat history:
