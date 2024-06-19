@@ -92,14 +92,18 @@ async def chat_stream(request):
             tasks = []
             if any(c in cat for c in ["Specific Domain Knowledge", "Organizational Change or Organizational Management", 
                                       "Definitional Questions", "Context Required"]):
-                tasks.append(mv.search_master_vectors(query=query, class_="MV001"))
-                tasks.append(llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection))
-                tasks.append(llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection))
-                tasks.append(llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id))
+                tasks.extend([
+                    mv.search_master_vectors(query=query, class_="MV001"),
+                    llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection),
+                    llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection),
+                    llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id)
+                ])
             elif any(c in cat for c in ["Individuals", "Personal Information"]):
-                tasks.append(llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection))
-                tasks.append(llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection))
-                tasks.append(llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id))
+                tasks.extend([
+                    llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection),
+                    llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection),
+                    llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id)
+                ])
             
             results = await asyncio.gather(*tasks)
             return results
