@@ -15,10 +15,6 @@ from dotenv import load_dotenv
 import json
 from .credentials import ClientCredentials
 from langchain.callbacks.tracers import ConsoleCallbackHandler
-import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -71,50 +67,81 @@ class SimpleCallback(BaseCallbackHandler):
 
 # async def return_vectors(query: str, class_: str, entity: str, user_id: str) -> str:
 #     return retriever
+
+
 @api_view(http_method_names=['POST'])
-async def chat_stream(request):
+def chat_stream(request) -> Response or StreamingHttpResponse:
     try:
         company = json.loads(request.body)
+        print(company)
         collection = "C" + str(company['collection'])
         query = str(company['query'])
         entity = str(company['entity'])
         user_id = str(company['user_id'])
 
-        if not await llm_hybrid.collection_exists(collection):
+        if llm_hybrid.collection_exists(collection) is False:
             return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
 
-        cat = await llm_hybrid.trigger_vectors(query=query)
-        
-        master_vector, company_vector, initiative_vector, member_vector = [], [], [], []
+        cat = llm_hybrid.trigger_vectors(query=query)
+
+        # SDK, OCoOM, DQ, CR -> Master, Company Vec, Init Vec, Private Vec
+        # AR, Greeting, GK, OoI, Ambiguous, Unrelated, OoS, Comparative -> No Vec
+        # PI, Individual -> Company Vec, Init Vec, Private Vec
+        # NEw Categories -> Comparative
+
+        # - Opinion or Subjective
+        # - Actionable Requests
+        # - Greeting
+        # - General Knowledge
+        # - Ambiguous
+        # - Unrelated
+        # - Obscene or Inappropriate
+
+        master_vector = []
+        company_vector = []
+        initiative_vector = []
+        member_vector = []
+
         combine_ids = "INP" + entity
 
-        async def fetch_vectors():
-            tasks = []
-            if any(c in cat for c in ["Specific Domain Knowledge", "Organizational Change or Organizational Management", 
-                                      "Definitional Questions", "Context Required"]):
-                tasks.extend([
-                    mv.search_master_vectors(query=query, class_="MV001"),
-                    llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection),
-                    llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection),
-                    llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id)
-                ])
-            elif any(c in cat for c in ["Individuals", "Personal Information"]):
-                tasks.extend([
-                    llm_hybrid.search_vectors_company(query=query, entity=collection, class_=collection),
-                    llm_hybrid.search_vectors_initiative(query=query, entity=entity, class_=collection),
-                    llm_hybrid.search_vectors_user(query=query, class_=collection, entity=combine_ids, user_id=user_id)
-                ])
-            
-            results = await asyncio.gather(*tasks)
-            return results
+        if "Specific Domain Knowledge" in cat or \
+                "Organizational Change or Organizational Management" in cat or \
+                "Definitional Questions" in cat or \
+                "Context Required" in cat:
+            master_vector = mv.search_master_vectors(query=query,
+                                                     class_="MV001")  # 45 -> PUBLIC
 
-        master_vector, company_vector, initiative_vector, member_vector = await fetch_vectors()
+            company_vector = llm_hybrid.search_vectors_company(query=query,
+                                                               entity=collection,
+                                                               class_=collection)
+            # 45 -> PUBLIC
+            initiative_vector = llm_hybrid.search_vectors_initiative(query=query,
+                                                                     entity=entity,
+                                                                     class_=collection)  # 45 INID -> PUBLIC
+              # -> INP70
+
+            member_vector = llm_hybrid.search_vectors_user(query=query,
+                                                           class_=collection,
+                                                           entity=combine_ids,
+                                                           user_id=user_id)  # 45, IN+MB, MB -> Private Vec
+        elif "Individuals" in cat or "Personal Information" in cat:
+            company_vector = llm_hybrid.search_vectors_company(query=query,
+                                                               entity=collection,
+                                                               class_=collection)
+
+            initiative_vector = llm_hybrid.search_vectors_initiative(query=query,
+                                                                     entity=entity,
+                                                                     class_=collection)
+
+            member_vector = llm_hybrid.search_vectors_user(query=query,
+                                                           class_=collection,
+                                                           entity=combine_ids,
+                                                           user_id=user_id)
 
         initiative_vector.extend(member_vector)
-        
-        top_master_vec = await mv.reranker(query=query, batch=master_vector)
-        top_company_vec = await llm_hybrid.reranker(query=query, batch=company_vector)
-        top_member_initiative_vec = await llm_hybrid.reranker(query=query, batch=initiative_vector, top_k=10)
+        top_master_vec = mv.reranker(query=query, batch=master_vector)
+        top_company_vec = llm_hybrid.reranker(query=query, batch=company_vector)
+        top_member_initiative_vec = llm_hybrid.reranker(query=query, batch=initiative_vector, top_k=10)
 
         retriever = f"{top_master_vec} \n\n {top_company_vec} \n {top_member_initiative_vec}"
 
@@ -122,24 +149,26 @@ async def chat_stream(request):
             'callbacks': [ConsoleCallbackHandler()]
         }
 
+        # return Response(retriever, status=status.HTTP_200_OK)
+
         chain = prompt | llm | StrOutputParser()
 
-        response_stream = await chain.stream({
-            'matching_model': retriever,
-            'question': query,
-            'username': company['user'],
-            'chat_history': "",
-            'language_to_use': company['language']
-        }, config=config)
+        response = chain.stream({'matching_model': retriever,
+                                 'question': query,
+                                 'username': company['user'],
+                                 'chat_history': "",
+                                 'language_to_use': company['language']}, config=config)
 
-        response = StreamingHttpResponse(response_stream, status=status.HTTP_200_OK, content_type='text/event-stream')
+        response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'
 
         return response
     except Exception as e:
-        logger.error(f"Error in chat_stream: {e}")
+        print("VIEW CHAT STREAM:")
+        print(e)
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-      
+
+
 @api_view(http_method_names=['POST'])
 def chatnote_stream(request) -> Response or StreamingHttpResponse:
     try:
