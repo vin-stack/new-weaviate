@@ -78,24 +78,12 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         query = str(company['query'])
         entity = str(company['entity'])
         user_id = str(company['user_id'])
+        chat_history = company.get('chatHistory', [])  # Get chat history from the request
 
         if llm_hybrid.collection_exists(collection) is False:
             return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
 
         cat = llm_hybrid.trigger_vectors(query=query)
-
-        # SDK, OCoOM, DQ, CR -> Master, Company Vec, Init Vec, Private Vec
-        # AR, Greeting, GK, OoI, Ambiguous, Unrelated, OoS, Comparative -> No Vec
-        # PI, Individual -> Company Vec, Init Vec, Private Vec
-        # NEw Categories -> Comparative
-
-        # - Opinion or Subjective
-        # - Actionable Requests
-        # - Greeting
-        # - General Knowledge
-        # - Ambiguous
-        # - Unrelated
-        # - Obscene or Inappropriate
 
         master_vector = []
         company_vector = []
@@ -118,7 +106,6 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
             initiative_vector = llm_hybrid.search_vectors_initiative(query=query,
                                                                      entity=entity,
                                                                      class_=collection)  # 45 INID -> PUBLIC
-              # -> INP70
 
             member_vector = llm_hybrid.search_vectors_user(query=query,
                                                            class_=collection,
@@ -149,14 +136,15 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
             'callbacks': [ConsoleCallbackHandler()]
         }
 
-        # return Response(retriever, status=status.HTTP_200_OK)
+        # Combine chat history into a single string for context
+        chat_history_str = "\n".join([f"{msg['role']}: {msg['text']}" for msg in chat_history])
 
         chain = prompt | llm | StrOutputParser()
 
         response = chain.stream({'matching_model': retriever,
                                  'question': query,
                                  'username': company['user'],
-                                 'chat_history': "",
+                                 'chat_history': chat_history_str,
                                  'language_to_use': company['language']}, config=config)
 
         response = StreamingHttpResponse(response, status=status.HTTP_200_OK, content_type='text/event-stream')
@@ -167,7 +155,6 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         print("VIEW CHAT STREAM:")
         print(e)
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(http_method_names=['POST'])
 def chatnote_stream(request) -> Response or StreamingHttpResponse:
