@@ -71,11 +71,10 @@ class SimpleCallback(BaseCallbackHandler):
 
 # Load the template string into a Jinja object.
 chat_template = (
-    "{{ bos_token }}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}"
-    "{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}"
+    "{{ bos_token }}{% for message in messages %}"
+    "{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}"
     "{% endif %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['text'] + ' [/INST]' }}"
     "{% elif message['role'] == 'assistant' %}{{ message['text'] + eos_token}}"
-    "{% else %}{{ raise_exception('Only user and assistant roles are supported!') }}"
     "{% endif %}{% endfor %}"
 )
 
