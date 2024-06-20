@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import json
 from .credentials import ClientCredentials
 from langchain.callbacks.tracers import ConsoleCallbackHandler
+from jinja2 import Template
 
 load_dotenv()
 
@@ -68,6 +69,17 @@ class SimpleCallback(BaseCallbackHandler):
 # async def return_vectors(query: str, class_: str, entity: str, user_id: str) -> str:
 #     return retriever
 
+# Load the template string into a Jinja object.
+chat_template = (
+    "{{ bos_token }}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}"
+    "{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}"
+    "{% endif %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['text'] + ' [/INST]' }}"
+    "{% elif message['role'] == 'assistant' %}{{ message['text'] + eos_token}}"
+    "{% else %}{{ raise_exception('Only user and assistant roles are supported!') }}"
+    "{% endif %}{% endfor %}"
+)
+
+template = Template(chat_template)
 
 @api_view(http_method_names=['POST'])
 def chat_stream(request) -> Response or StreamingHttpResponse:
@@ -136,8 +148,15 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
             'callbacks': [ConsoleCallbackHandler()]
         }
 
-        # Combine chat history into a single string for context
-        chat_history_str = "\n".join([f"{msg['role']}: {msg['text']}" for msg in chat_history])
+        # Format chat history using Jinja2 template
+        data = {
+            "bos_token": "<s>",
+            "eos_token": "</s>",
+            "messages": [
+                {"role": msg['role'], "text": msg['text']} for msg in chat_history
+            ]
+        }
+        chat_history_str = template.render(data)
 
         chain = prompt | llm | StrOutputParser()
 
@@ -155,7 +174,7 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         print("VIEW CHAT STREAM:")
         print(e)
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+    
 @api_view(http_method_names=['POST'])
 def chatnote_stream(request) -> Response or StreamingHttpResponse:
     try:
