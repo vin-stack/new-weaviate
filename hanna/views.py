@@ -16,7 +16,6 @@ import json
 from .credentials import ClientCredentials
 from langchain.callbacks.tracers import ConsoleCallbackHandler
 from jinja2 import Template
-
 load_dotenv()
 
 credentials = ClientCredentials()
@@ -41,6 +40,7 @@ llm = ChatOpenAI(openai_api_key=settings.OPENAI_API_KEY,
                  temperature=0.4,
                  max_tokens=1000,
                  streaming=True)
+
 
 llm_hybrid = LLMHybridRetriever(verbose=True)
 
@@ -68,6 +68,7 @@ class SimpleCallback(BaseCallbackHandler):
 
 # async def return_vectors(query: str, class_: str, entity: str, user_id: str) -> str:
 #     return retriever
+
 
 # Load the template string into a Jinja object.
 chat_template = (
@@ -141,21 +142,24 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         top_company_vec = llm_hybrid.reranker(query=query, batch=company_vector)
         top_member_initiative_vec = llm_hybrid.reranker(query=query, batch=initiative_vector, top_k=10)
 
-        retriever = f"{top_master_vec} \n\n {top_company_vec} \n {top_member_initiative_vec}"
+        retriever = f"{top_master_vec} {top_company_vec} {top_member_initiative_vec}"
 
         config = {
             'callbacks': [ConsoleCallbackHandler()]
         }
 
-        # Format chat history using Jinja2 template
-        data = {
-            "bos_token": "<s>",
-            "eos_token": "</s>",
-            "messages": [
-                {"role": msg['role'], "text": msg['text']} for msg in chat_history
-            ]
-        }
-        chat_history_str = template.render(data)
+        if not chat_history:
+            chat_history_str = ""
+        else:
+            data = {
+                "bos_token": "<s>",
+                "eos_token": "</s>",
+                "messages": [
+                    {"role": msg['role'], "text": msg['text']} for msg in chat_history
+                ]
+            }
+            chat_history_str = template.render(data)
+
 
         chain = prompt | llm | StrOutputParser()
 
@@ -173,7 +177,8 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         print("VIEW CHAT STREAM:")
         print(e)
         return Response({'error': 'Something went wrong!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+
+
 @api_view(http_method_names=['POST'])
 def chatnote_stream(request) -> Response or StreamingHttpResponse:
     try:
