@@ -78,7 +78,7 @@ def chat_stream(request) -> Response or StreamingHttpResponse:
         query = str(company['query'])
         entity = str(company['entity'])
         user_id = str(company['user_id'])
-        chat_history = company.get('chatHistory', "")  # Get chat history from the request
+        chat_history = company.get('chatHistory', [])  # Get chat history from the request
 
         if llm_hybrid.collection_exists(collection) is False:
             return Response({'error': 'This collection does not exist!'}, status=status.HTTP_400_BAD_REQUEST)
